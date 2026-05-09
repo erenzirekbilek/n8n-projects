@@ -1,0 +1,691 @@
+{
+  "name": "github_repo_fetch",
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8341e8fe-4fd1-47ec-a528-7e230c9758de",
+              "name": "repo_owner",
+              "value": "={{ $json.repo_owner }}",
+              "type": "string"
+            },
+            {
+              "id": "1cbd08d3-a3d7-4e5d-8530-1b7ee4e61226",
+              "name": "repo_name",
+              "value": "={{ $json.repo_name }}",
+              "type": "string"
+            },
+            {
+              "id": "4ace1b14-afc5-4f57-ba84-cbb53a67502f",
+              "name": "branch",
+              "value": "={{ $json.branch_name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "a589eb78-ffa8-4258-8f40-11ffa8121daf",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.repo_owner }}/{{ $json.repo_name }}/git/trees/{{ $json.branch }}?recursive=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "87d46da6-5ae5-4c5d-8072-9dd6542a0f4a",
+      "name": "HTTP Request",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "Nqm8yayDtAc7IpwI",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the tree from HTTP response\nconst tree = $input.first().json.tree;\n\n// Repo info\nconst repoOwner = $('Edit Fields').first().json.repo_owner;\nconst repoName = $('Edit Fields').first().json.repo_name;\nconst branch = $('Edit Fields').first().json.branch;\n\n// Allowed file extensions (NO CSV)\nconst allowedExtensions = [\n  'py', 'js', 'ts', 'tsx', 'jsx',\n  'md', 'json', 'yaml', 'yml',\n  'css', 'html', 'txt', 'sh', 'env',\n  'ipynb'\n];\n\n// Paths to exclude\nconst excludedPaths = [\n  '__pycache__/',\n  '.pyc',\n  'node_modules/',\n  'dist/',\n  'build/',\n  '.git/',\n  'venv/',\n  '.next/',\n  'coverage/',\n  '.github/',\n  '.idea/',\n  '.vscode/'\n];\n\n// Filenames to exclude\nconst excludedFiles = [\n  '__init__.py'\n];\n\n// Size limit\nconst MAX_FILE_SIZE = 1_000_000;   // 1MB\n\n// Filter files\nconst filteredFiles = tree\n  .filter(item => item.type === 'blob')\n  .filter(item => item.size > 0)                     // 🚫 remove zero-byte files\n  .filter(item => {\n    const ext = item.path.split('.').pop().toLowerCase();\n    return allowedExtensions.includes(ext);\n  })\n  .filter(item => {\n    return !excludedPaths.some(excluded =>\n      item.path.includes(excluded)\n    );\n  })\n  .filter(item => {\n    const filename = item.path.split('/').pop().toLowerCase();\n    return !excludedFiles.includes(filename);\n  })\n  .filter(item => item.size <= MAX_FILE_SIZE);\n\n// Prepare output\nconst output = filteredFiles.map(file => {\n  const ext = file.path.split('.').pop().toLowerCase();\n\n  return {\n    json: {\n      file_path: file.path,\n      file_size: file.size,\n      repo_owner: repoOwner,\n      repo_name: repoName,\n      branch: branch,\n      file_extension: ext,\n      sha: file.sha\n    }\n  };\n});\n\nconsole.log(\n  `✅ Indexed ${filteredFiles.length} files from ${repoOwner}/${repoName}@${branch}`\n);\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "74e73648-8d81-4354-869f-7d15278df7ea",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "get",
+        "owner": {
+          "__rl": true,
+          "value": "=https://github.com/{{ $json.repo_owner }}",
+          "mode": "url"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "=https://github.com/{{ $json.repo_owner }}/{{ $json.repo_name }}",
+          "mode": "url"
+        },
+        "filePath": "={{ $json.file_path }}",
+        "asBinaryProperty": false,
+        "additionalParameters": {}
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [
+        1040,
+        96
+      ],
+      "id": "e72d8095-0536-4bde-a24b-94b2458fd7d9",
+      "name": "Get a file",
+      "webhookId": "3057dfcb-af17-45a1-b564-aac7878879a4",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "Nqm8yayDtAc7IpwI",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 1
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1456,
+        96
+      ],
+      "id": "ffcc05e2-8c58-4d32-b887-871cd1107112",
+      "name": "Wait",
+      "webhookId": "d5fd17ca-8467-465a-8efa-c0a66864e2b6"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decode base64 content to readable UTF-8 text\nconst content = Buffer.from($json.content || '', 'base64').toString('utf-8');\n\n// Repo info\nconst repo_name = $('Edit Fields').first().json.repo_name;\nconst repo_owner = $('Edit Fields').first().json.repo_owner;\nconst branch = $('Edit Fields').first().json.branch;\n\n// File path (GitHub sometimes sends `path` or `name`)\nconst filePath = $json.path || 'unknown';\n\n// Get raw file extension\nconst rawExtension = (filePath.split('.').pop() || '').toLowerCase();\n\n// Map file extensions to Text Splitter language codes\nconst extensionMap = {\n  py: 'python',\n  md: 'markdown',\n  js: 'js',\n  ts: 'js',\n  jsx: 'js',\n  tsx: 'js',\n  java: 'java',\n  cpp: 'cpp',\n  cc: 'cpp',\n  cxx: 'cpp',\n  go: 'go',\n  php: 'php',\n  rb: 'ruby',\n  rs: 'rust',\n  scala: 'scala',\n  swift: 'swift',\n  tex: 'latex',\n  rst: 'rst',\n  proto: 'proto',\n  html: 'html'\n};\n\n// Get the correct splitter language (or empty for generic)\nconst splitterCode = extensionMap[rawExtension] || '';\n\n// Return in LangChain-compatible format\nreturn {\n  json: {\n    pageContent: content,\n    file_extension: splitterCode,   // Used by Text Splitter\n    metadata: {\n      file_path: filePath,\n      repository: `${repo_owner}/${repo_name}`,   // FIXED\n      branch: branch,\n      file_type: rawExtension,\n      file_size: $json.size || 0,\n      indexed_at: new Date().toISOString(),\n      sha: $json.sha || null\n    }\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        96
+      ],
+      "id": "13f0243a-b58f-4806-af03-dcc8b64620d0",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "githubrag-n8n",
+          "mode": "list",
+          "cachedResultName": "githubrag-n8n"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        1712,
+        96
+      ],
+      "id": "96d51073-5407-4621-8890-72cba5dc9839",
+      "name": "Pinecone Vector Store",
+      "credentials": {
+        "pineconeApi": {
+          "id": "Zr2R2yzsXxK1KGjI",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.pageContent}}",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "file_extension",
+                "value": "={{ $('Wait').item.json.file_extension }}"
+              },
+              {
+                "name": "file_path",
+                "value": "={{ $('Wait').item.json.metadata.file_path }}"
+              },
+              {
+                "name": "repository",
+                "value": "={{ $('Wait').item.json.metadata.repository }}"
+              },
+              {
+                "name": "branch",
+                "value": "={{ $('Wait').item.json.metadata.branch }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1904,
+        352
+      ],
+      "id": "b872dbc0-4060-4672-9596-6c51c750101d",
+      "name": "Default Data Loader"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        352
+      ],
+      "id": "1a9fe94d-a9a5-435c-8302-1979f8b52126",
+      "name": "Embeddings Google Gemini",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "LDUXZuw1OH2KGcHZ",
+          "name": "Google Gemini(PaLM) Api account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=User_Query :  {{ $json.body.user_query }}",
+        "options": {
+          "systemMessage": "You are an expert code analysis assistant with deep knowledge of software development and programming best practices.\n\n**Your Role:**\nHelp users understand the GitHub repository codebase by:\n1. Explaining what files, folders, functions, and classes do\n2. Describing how the code works and why it's structured that way\n3. Identifying relationships between different parts of the code\n4. Answering questions about implementation details\n5. Generating comprehensive documentation like README files\n\n---\n\n**Response Guidelines:**\n\n1. **Be Specific with File References**\n   - Always mention exact file paths when discussing code\n   - Good: \"In src/utils/helper.py, the parse_data() function...\"\n   - Bad: \"The parsing function...\"\n   - Reference specific line numbers or code sections when relevant\n\n2. **Provide Context and Purpose**\n   - Explain WHAT the code does\n   - Explain WHY it exists in the larger system\n   - Mention related files and dependencies\n   - Describe how components interact with each other\n\n3. **Show Relevant Code**\n   - Use proper markdown code blocks with language tags (```python, ```javascript, etc.)\n   - Keep examples concise but meaningful\n   - Highlight key logic and important patterns\n   - Show actual code from the retrieved chunks\n\n4. **Handling \"Show Me the Code\" Requests**\n   When users ask to \"show the code\", \"give me the exact code\", or \"display the full file\":\n   \n   - Show the most relevant code sections from the retrieved chunks\n   - Explain what the file does and its role in the project\n   - Provide a direct GitHub link for the complete file\n   \n   Example response format:\n   \"Here are the key sections from [file_path]:\n```[language]\n   [relevant code chunk showing main functionality]\n```\n   \n   This file handles [description of functionality]. It [explain purpose and key features].\n   \n   📄 View the complete file on GitHub: [construct link based on retrieved metadata]\"\n   \n   **Important**: You receive code in chunks (~2000 characters each). For large files, you may only see portions. Always show what you have and provide the GitHub link for the complete file.\n\n5. **Be Honest About Limitations**\n   - If you don't find relevant information in the retrieved code, say so clearly\n   - If you're uncertain, indicate your confidence level\n   - Suggest where the user might find more information (other files, documentation)\n   - Never make up code or functionality that isn't in the retrieved chunks\n   - If asked about files not in the indexed codebase, acknowledge this\n\n6. **Structure Your Answers**\n   - For complex questions, use clear sections with headers\n   - Use bullet points for lists of features or components  \n   - Use numbered steps for processes or workflows\n   - Make responses scannable and easy to read\n   - Use tables when comparing multiple items or options\n\n7. **README Generation**\n   When asked to generate a README, create comprehensive documentation including:\n   \n   - **Project Overview**: What the project does and its purpose (infer from code structure)\n   - **Features**: Key capabilities and highlights (based on actual functionality)\n   - **Installation**: Step-by-step setup instructions (check for package.json, requirements.txt, etc.)\n   - **Usage**: How to run and use the application (look for entry points like main.py, index.js, etc.)\n   - **Project Structure**: Folder and file organization with descriptions\n   - **Dependencies**: Required packages and their purposes\n   - **Configuration**: Important settings or environment variables (check config files)\n   - **API Documentation**: If applicable, document endpoints and functions\n   - **How It Works**: Technical explanation of the main workflow\n   - **Contributing**: Guidelines if this appears to be an open-source project\n   - **License**: Mention if found in the repository\n   \n   Base ALL README content on actual code in the repository. Use proper markdown formatting with headers, code blocks, lists, and tables.\n\n8. **Language and Framework Detection**\n   - Automatically identify the programming languages used (Python, JavaScript, TypeScript, Go, etc.)\n   - Recognize frameworks and libraries (React, Flask, Django, Express, etc.)\n   - Adapt your explanations based on the technology stack\n   - Use language-specific terminology and best practices\n\n9. **Code Quality Observations**\n   When relevant, mention:\n   - Good patterns or practices you observe\n   - Potential areas for improvement (tactfully)\n   - How the code follows language-specific conventions\n   - Dependencies and their purposes\n   - Security considerations if applicable\n\n10. **GitHub Link Construction**\n    Use the metadata from retrieved chunks to construct accurate GitHub links:\n    - Format: https://github.com/{repository}/{blob|tree}/{branch}/{file_path}\n    - Extract repository, branch, and file_path from the metadata\n    - Use \"blob\" for files, \"tree\" for directories\n    - Always verify the link structure matches the repository metadata\n\n---\n\n**Response Style:**\n- Be conversational but professional\n- Use clear, concise language without unnecessary jargon\n- Adapt technical depth to match the user's question complexity\n- Format code blocks properly with syntax highlighting\n- Use emojis sparingly and only when they add clarity (📄 for files, ✅ for confirmations, 🔧 for tools)\n- Make responses easy to scan with headers, lists, and spacing\n- Be encouraging and supportive in your explanations\n\n**Critical Rules:**\n- Never say \"I cannot provide the code\" - always show what you have and provide GitHub links\n- Never apologize excessively - be helpful and solution-oriented\n- Never make assumptions about code you haven't seen in the retrieved chunks\n- Always cite specific files when discussing functionality\n- Construct GitHub links dynamically based on the repository metadata\n- If you don't recognize the project type, analyze the code structure to understand it\n- Treat all repositories equally - don't assume specific project types\n\n**Context Awareness:**\n- The code chunks you receive include metadata: file_path, repository, branch, file_type, file_size\n- Use this metadata to provide accurate context and construct proper links\n- Pay attention to the folder structure to understand the project organization\n- Look for common patterns (src/, lib/, modules/, components/, etc.) to understand architecture\n\nYour goal is to make ANY codebase understandable, accessible, and well-documented. Help users learn, navigate, and work with their code effectively, regardless of the programming language or project type."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        288,
+        640
+      ],
+      "id": "5705ecac-7afb-440b-989f-d114828b1876",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        160,
+        848
+      ],
+      "id": "47d9f874-56af-4027-8760-0f0890875990",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "LDUXZuw1OH2KGcHZ",
+          "name": "Google Gemini(PaLM) Api account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook1').item.json.body.user_session_id }}",
+        "contextWindowLength": 15
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        304,
+        848
+      ],
+      "id": "eef3a1d2-af2e-4e87-9196-b45b484ff7dd",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Search the GitHub repository codebase for relevant code files, functions, and documentation. Use this tool to find information about what different parts of the code do, how they work, and their relationships.",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "githubrag-n8n",
+          "mode": "list",
+          "cachedResultName": "githubrag-n8n"
+        },
+        "topK": 10,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        528,
+        848
+      ],
+      "id": "823ea6f6-ec93-48ad-90d7-db36d73b88f4",
+      "name": "Pinecone Vector Store1",
+      "credentials": {
+        "pineconeApi": {
+          "id": "Zr2R2yzsXxK1KGjI",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        704,
+        1072
+      ],
+      "id": "0bf3508f-bc3f-404f-8ff7-e7592de65cdc",
+      "name": "Embeddings Google Gemini1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "LDUXZuw1OH2KGcHZ",
+          "name": "Google Gemini(PaLM) Api account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chunkSize": 20000,
+        "chunkOverlap": 2000
+      },
+      "type": "@n8n/n8n-nodes-langchain.textSplitterTokenSplitter",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        560
+      ],
+      "id": "89ced139-8078-4fb6-b038-7f0af32f96a2",
+      "name": "Token Splitter"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json.body.github_url;\nconst branch = $input.first().json.body.branch\n\nif (!input) {\n  throw new Error(\"github_url is missing\");\n}\n\nlet url = input.trim();\n\n// Remove protocol\nurl = url.replace(/^https?:\\/\\//, \"\");\n\n// Remove query string or hash\nurl = url.split(\"?\")[0].split(\"#\")[0];\n\n// Now split by /\nconst parts = url.split(\"/\").filter(p => p.length > 0);\n\n// Handle raw.githubusercontent.com\n// raw.githubusercontent.com/owner/repo/branch/file\nif (parts[0] === \"raw.githubusercontent.com\") {\n  if (parts.length < 3) {\n    throw new Error(\"Invalid raw GitHub URL\");\n  }\n\n  return {\n    json: {\n      repo_owner: parts[1],\n      repo_name: parts[2],\n      full_repo: `${parts[1]}/${parts[2]}`\n    }\n  };\n}\n\n// Handle github.com\n// github.com/owner/repo/...\nif (parts[0] === \"github.com\") {\n  if (parts.length < 3) {\n    throw new Error(\"Invalid GitHub repository URL\");\n  }\n\n  const repo_owner = parts[1];\n  const repo_name = parts[2].replace(/\\.git$/, \"\");\n\n  return {\n    json: {\n      repo_owner,\n      repo_name,\n      full_repo: `${repo_owner}/${repo_name}`,\n      branch_name : branch\n    }\n  };\n}\n\nthrow new Error(\"Not a GitHub URL\");\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        16
+      ],
+      "id": "a6f9aaed-0217-49f2-ae10-3c5c466d63c2",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "get_github_url",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -528,
+        16
+      ],
+      "id": "cc23be01-7860-4680-bd5e-92cf54b80234",
+      "name": "Webhook",
+      "webhookId": "c3c77691-dddb-463a-86aa-8349f6df45e1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e2f62ff0-f548-4c6e-bafa-7d99cf40dc23",
+              "name": "Success_message",
+              "value": "All Files are been fetched and added to Pinecone Database",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        -80
+      ],
+      "id": "bc2ed8a2-c961-4d71-9a69-e54b188cf12c",
+      "name": "Edit Fields2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1248,
+        -80
+      ],
+      "id": "6adbd6ac-2fdd-4aee-ac06-ec09004a241e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "get_user_query",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        624
+      ],
+      "id": "8b230676-08de-4f27-bfb5-a09179b7569d",
+      "name": "Webhook1",
+      "webhookId": "150dd9c8-ea41-42c8-b435-3b516ee3bb25"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        640,
+        672
+      ],
+      "id": "7c9cc727-524f-4321-b12a-583775401a56",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        832,
+        0
+      ],
+      "id": "028c1b60-2ec8-4d03-a925-7d2d23d2a6d9",
+      "name": "Loop Over Items",
+      "alwaysOutputData": false
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a file": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Vector Store1": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Default Data Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields2": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "50c1f3ce-7e82-4b30-9e78-8661856bb190",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "0cc1de0dd4f90abc341a1baf6f6046729327a33bc357c212b26b606f44fae410"
+  },
+  "id": "h9rXJjm5GwgNObtA",
+  "tags": []
+}
