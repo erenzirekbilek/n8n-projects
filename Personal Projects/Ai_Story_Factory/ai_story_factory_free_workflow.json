@@ -1,0 +1,363 @@
+{
+  "name": "AI Story Factory - Ücretsiz Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-story-factory-free",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-240, 0],
+      "id": "node_webhook",
+      "name": "Webhook Trigger",
+      "webhookId": "ai-story-factory-free"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json.body || $input.first().json;\n\nreturn [{\n  json: {\n    theme: input.theme || 'Fantasy',\n    genre: input.genre || 'Adventure',\n    target_platform: input.target_platform || 'TikTok',\n    story_length: input.story_length || 'short',\n    num_episodes: input.num_episodes || 2,\n    num_scenes_per_episode: input.num_scenes_per_episode || 3\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-20, 0],
+      "id": "node_parse_input",
+      "name": "Parse Input"
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "llama-3.1-70b-versatile"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"system\", \"content\": \"You are a creative Story Generator Agent for AI Story Factory. Your ONLY output must be a valid JSON object — no markdown, no backticks, no explanation.\\n\\nGenerate a story with this exact structure:\\n{\\n  \\\"title\\\": \\\"string\\\",\\n  \\\"summary\\\": \\\"string\\\",\\n  \\\"genre\\\": \\\"string\\\",\\n  \\\"theme\\\": \\\"string\\\",\\n  \\\"characters\\\": [\\n    {\\n      \\\"name\\\": \\\"string\\\",\\n      \\\"appearance\\\": \\\"string (for image prompts)\\\",\\n      \\\"personality\\\": \\\"string\\\",\\n      \\\"voice_id\\\": \\\"string (edge tts voice name)\\\"\\n    }\\n  ],\\n  \\\"episodes\\\": [\\n    {\\n      \\\"episode_number\\\": 1,\\n      \\\"title\\\": \\\"string\\\",\\n      \\\"summary\\\": \\\"string\\\",\\n      \\\"scenes\\\": [\\n        {\\n          \\\"scene_number\\\": 1,\\n          \\\"description\\\": \\\"Detailed visual scene description suitable for image generation\\\",\\n          \\\"dialogue\\\": {\\n            \\\"speaker\\\": \\\"Character name\\\",\\n            \\\"text\\\": \\\"What the character says (max 15 words)\\\"\\n          }\\n        }\\n      ]\\n    }\\n  ]\\n}\\n\\nRules:\\n- Make scenes visually vivid and specific for AI image generation\\n- Keep dialogue under 15 words per scene\\n- Story must work as short vertical video (TikTok/Reels style)\\n- Output ONLY the JSON object, nothing else\"}, {\"role\": \"user\", \"content\": \"Generate a {{ $json.story_length }} {{ $json.genre }} story with theme: {{ $json.theme }}\\nTarget platform: {{ $json.target_platform }}\\nEpisodes: {{ $json.num_episodes }}\\nScenes per episode: {{ $json.num_scenes_per_episode }}\"}]"
+            },
+            {
+              "name": "temperature",
+              "value": 0.85
+            },
+            {
+              "name": "max_tokens",
+              "value": 4000
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [200, 0],
+      "id": "node_story_generator",
+      "name": "Story Generator (Groq - Ücretsiz)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_GROQ_CREDENTIAL_ID",
+          "name": "Groq API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the Groq JSON output into a proper JSON object\nconst response = $input.first().json;\nconst raw = response.choices?.[0]?.message?.content || response.text || '';\n\nlet story;\ntry {\n  const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();\n  story = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('Story Generator returned invalid JSON. Raw output: ' + raw.substring(0, 300));\n}\n\nif (!story.episodes || !Array.isArray(story.episodes)) {\n  throw new Error('Story JSON missing episodes array');\n}\n\nreturn [{ json: story }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0],
+      "id": "node_parse_story",
+      "name": "Parse Story JSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten story into individual scene items for the loop\nconst story = $input.first().json;\nconst allScenes = [];\n\nstory.episodes.forEach(episode => {\n  if (!Array.isArray(episode.scenes)) return;\n  episode.scenes.forEach(scene => {\n    allScenes.push({\n      story_title: story.title,\n      story_genre: story.genre,\n      story_theme: story.theme,\n      characters: story.characters || [],\n      episode_number: episode.episode_number,\n      episode_title: episode.title,\n      scene_number: scene.scene_number,\n      description: scene.description,\n      dialogue_speaker: scene.dialogue?.speaker || '',\n      dialogue_text: scene.dialogue?.text || '',\n      asset_key: `ep${episode.episode_number}_sc${scene.scene_number}`\n    });\n  });\n});\n\nif (allScenes.length === 0) {\n  throw new Error('No scenes found in story');\n}\n\nreturn allScenes.map(s => ({ json: s }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 0],
+      "id": "node_extract_scenes",
+      "name": "Extract All Scenes"
+    },
+    {
+      "parameters": {
+        "options": {
+          "batchSize": 1,
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 0],
+      "id": "node_loop",
+      "name": "Loop Over Scenes"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build a rich cinematic prompt for image generation\nconst scene = $input.first().json;\n\nconst characters = scene.characters || [];\nconst speaker = characters.find(c => c.name === scene.dialogue_speaker);\nconst charDesc = speaker ? `, ${speaker.appearance}` : '';\n\nconst platformComposition = {\n  'TikTok': 'vertical 9:16 composition, close-up framing',\n  'Shorts': 'vertical 9:16 composition, dynamic angle',\n  'Reels': 'vertical 9:16 composition, cinematic framing',\n  'default': 'cinematic wide shot'\n};\nconst composition = platformComposition[scene.target_platform] || platformComposition.default;\n\nconst genreStyle = {\n  'Fantasy': 'fantasy art style, magical lighting, ethereal atmosphere',\n  'Sci-Fi': 'sci-fi concept art, futuristic neon lighting, cyberpunk aesthetic',\n  'Horror': 'dark gothic atmosphere, dramatic shadows, ominous lighting',\n  'Romance': 'soft warm lighting, pastel color palette, dreamy atmosphere',\n  'Adventure': 'epic cinematic lighting, vivid colors, dynamic composition',\n  'Drama': 'realistic style, natural lighting, emotional depth'\n};\nconst style = genreStyle[scene.story_genre] || 'cinematic art style, dramatic lighting';\n\nconst prompt = [\n  scene.description,\n  charDesc,\n  style,\n  composition,\n  'ultra detailed, 4K, film grain, professional photography'\n].filter(Boolean).join(', ');\n\nreturn [{\n  json: {\n    ...scene,\n    image_prompt: prompt\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, -80],
+      "id": "node_prompt_gen",
+      "name": "Generate Image Prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-medium",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "inputs",
+              "value": "={{ $json.image_prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, -80],
+      "id": "node_generate_image",
+      "name": "Generate Image (HuggingFace - Ücretsiz)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_HUGGINGFACE_CREDENTIAL_ID",
+          "name": "HuggingFace API Key"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract image URL from HuggingFace response\nconst response = $input.first().json;\nconst scene = $('Generate Image Prompt').first().json;\n\nlet imageUrl = null;\n\n// Handle different response formats\nif (Array.isArray(response) && response[0]) {\n  imageUrl = response[0].url || response[0].base64;\n} else if (response.image) {\n  imageUrl = response.image;\n} else if (response.url) {\n  imageUrl = response.url;\n}\n\n// If base64, create data URL\nif (imageUrl && !imageUrl.startsWith('http')) {\n  imageUrl = `data:image/png;base64,${imageUrl}`;\n}\n\nif (!imageUrl) {\n  // Fallback: use a placeholder or retry\n  throw new Error('No image in HuggingFace response: ' + JSON.stringify(response).substring(0, 200));\n}\n\nreturn [{\n  json: {\n    ...scene,\n    image_url: imageUrl,\n    image_base64: imageUrl.startsWith('data:') ? imageUrl.split(',')[1] : null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, -80],
+      "id": "node_extract_image_url",
+      "name": "Extract Image URL"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.image_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1780, -80],
+      "id": "node_download_image",
+      "name": "Download Image"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare speech bubble data\nconst binaryData = $input.first().binary;\nconst scene = $('Extract Image URL').first().json;\n\nconst imageBase64 = binaryData?.data?.data\n  ? Buffer.from(binaryData.data.data).toString('base64')\n  : null;\n\nreturn [{\n  json: {\n    ...scene,\n    image_base64: imageBase64,\n    bubble_text: scene.dialogue_text,\n    speaker_name: scene.dialogue_speaker,\n    has_dialogue: Boolean(scene.dialogue_text)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, -80],
+      "id": "node_prepare_bubble",
+      "name": "Prepare Speech Bubble Data"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5001/render-bubble",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ image_base64: $json.image_base64, bubble_text: $json.bubble_text, speaker_name: $json.speaker_name, asset_key: $json.asset_key }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2220, -80],
+      "id": "node_render_bubble",
+      "name": "Render Speech Bubble (Python)",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge bubble render result\nconst bubbleResult = $input.first().json;\nconst scene = $('Prepare Speech Bubble Data').first().json;\n\nreturn [{\n  json: {\n    ...scene,\n    final_image_url: bubbleResult.output_url || scene.image_url,\n    final_image_base64: bubbleResult.output_base64 || scene.image_base64,\n    bubble_rendered: bubbleResult.success || false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2440, -80],
+      "id": "node_bubble_result",
+      "name": "Bubble Render Result"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5002/synthesize",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ text: $json.dialogue_text || 'No dialogue', voice: 'tr-TR-UmutNeural', output_file: $json.asset_key + '.mp3' }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2660, -80],
+      "id": "node_voice_gen",
+      "name": "Generate Voice (Edge TTS - Ücretsiz)",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge voice result with scene data\nconst voiceResult = $input.first().json;\nconst scene = $('Bubble Render Result').first().json;\n\nreturn [{\n  json: {\n    asset_key: scene.asset_key,\n    episode_number: scene.episode_number,\n    episode_title: scene.episode_title,\n    scene_number: scene.scene_number,\n    description: scene.description,\n    dialogue_speaker: scene.dialogue_speaker,\n    dialogue_text: scene.dialogue_text,\n    image_url: scene.final_image_url,\n    final_image_base64: scene.final_image_base64,\n    voice_url: voiceResult.output_path || `storage://voices/${scene.asset_key}.mp3`,\n    voice_base64: voiceResult.audio_base64 || null,\n    bubble_rendered: scene.bubble_rendered,\n    status: 'scene_complete'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, -80],
+      "id": "node_scene_complete",
+      "name": "Scene Complete"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all completed scenes and group by episode\nconst allScenes = $input.all().map(item => item.json);\n\nif (allScenes.length === 0) {\n  throw new Error('No completed scenes to merge');\n}\n\nconst episodeMap = {};\nallScenes.forEach(scene => {\n  const epKey = scene.episode_number;\n  if (!episodeMap[epKey]) {\n    episodeMap[epKey] = {\n      episode_number: epKey,\n      episode_title: scene.episode_title,\n      scenes: []\n    };\n  }\n  episodeMap[epKey].scenes.push(scene);\n});\n\nObject.values(episodeMap).forEach(ep => {\n  ep.scenes.sort((a, b) => a.scene_number - b.scene_number);\n});\n\nconst episodes = Object.values(episodeMap).sort((a, b) => a.episode_number - b.episode_number);\n\nreturn [{\n  json: {\n    story_title: allScenes[0]?.story_title || 'Untitled',\n    total_scenes: allScenes.length,\n    total_episodes: episodes.length,\n    episodes: episodes,\n    all_scenes: allScenes,\n    status: 'ready_for_render'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 0],
+      "id": "node_merge_assets",
+      "name": "Merge All Assets"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5003/render-video",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ story_title: $json.story_title, episodes: $json.episodes, output_format: 'mp4', aspect_ratio: '9:16', fps: 30, transition: 'fade', scene_duration: 5 }) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3320, 0],
+      "id": "node_render_video",
+      "name": "Render Video (MoviePy - Ücretsiz)",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build final response\nconst renderResult = $input.first().json;\nconst assetData = $('Merge All Assets').first().json;\n\nconst response = {\n  success: true,\n  story_title: assetData.story_title,\n  total_scenes: assetData.total_scenes,\n  total_episodes: assetData.total_episodes,\n  video_url: renderResult.output_path || null,\n  video_duration_seconds: renderResult.duration || null,\n  thumbnail_url: renderResult.thumbnail || null,\n  episodes: assetData.episodes.map(ep => ({\n    episode_number: ep.episode_number,\n    episode_title: ep.episode_title,\n    scenes: ep.scenes.map(sc => ({\n      scene_number: sc.scene_number,\n      image_url: sc.image_url,\n      voice_url: sc.voice_url,\n      dialogue: { speaker: sc.dialogue_speaker, text: sc.dialogue_text }\n    }))\n  })),\n  render_status: renderResult.status || 'unknown',\n  created_at: new Date().toISOString()\n};\n\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3540, 0],
+      "id": "node_build_response",
+      "name": "Build Final Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3760, 0],
+      "id": "node_respond",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Parse Input", "type": "main", "index": 0 }]] },
+    "Parse Input": { "main": [[{ "node": "Story Generator (Groq - Ücretsiz)", "type": "main", "index": 0 }]] },
+    "Story Generator (Groq - Ücretsiz)": { "main": [[{ "node": "Parse Story JSON", "type": "main", "index": 0 }]] },
+    "Parse Story JSON": { "main": [[{ "node": "Extract All Scenes", "type": "main", "index": 0 }]] },
+    "Extract All Scenes": { "main": [[{ "node": "Loop Over Scenes", "type": "main", "index": 0 }]] },
+    "Loop Over Scenes": { "main": [[{ "node": "Generate Image Prompt", "type": "main", "index": 0 }], [{ "node": "Merge All Assets", "type": "main", "index": 0 }]] },
+    "Generate Image Prompt": { "main": [[{ "node": "Generate Image (HuggingFace - Ücretsiz)", "type": "main", "index": 0 }]] },
+    "Generate Image (HuggingFace - Ücretsiz)": { "main": [[{ "node": "Extract Image URL", "type": "main", "index": 0 }]] },
+    "Extract Image URL": { "main": [[{ "node": "Download Image", "type": "main", "index": 0 }]] },
+    "Download Image": { "main": [[{ "node": "Prepare Speech Bubble Data", "type": "main", "index": 0 }]] },
+    "Prepare Speech Bubble Data": { "main": [[{ "node": "Render Speech Bubble (Python)", "type": "main", "index": 0 }]] },
+    "Render Speech Bubble (Python)": { "main": [[{ "node": "Bubble Render Result", "type": "main", "index": 0 }]] },
+    "Bubble Render Result": { "main": [[{ "node": "Generate Voice (Edge TTS - Ücretsiz)", "type": "main", "index": 0 }]] },
+    "Generate Voice (Edge TTS - Ücretsiz)": { "main": [[{ "node": "Scene Complete", "type": "main", "index": 0 }]] },
+    "Scene Complete": { "main": [[{ "node": "Loop Over Scenes", "type": "main", "index": 0 }]] },
+    "Merge All Assets": { "main": [[{ "node": "Render Video (MoviePy - Ücretsiz)", "type": "main", "index": 0 }]] },
+    "Render Video (MoviePy - Ücretsiz)": { "main": [[{ "node": "Build Final Response", "type": "main", "index": 0 }]] },
+    "Build Final Response": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": { "instanceId": "ai-story-factory-free" },
+  "id": "ai-story-factory-free-v1",
+  "tags": ["ai", "story", "free", "video"]
+}

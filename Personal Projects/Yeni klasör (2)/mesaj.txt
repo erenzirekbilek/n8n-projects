@@ -1,0 +1,12 @@
+Selam! Docker üzerinde Node.js (backend) ve PostgreSQL (ticket_db) konteynerleri içeren bir proje çalıştırıyorum. 
+
+Bağlantı esnasında "database ticketdb does not exist" hatası alıyorum. Docker Desktop içindeki postgres konteynerinin terminaline (psql) girip manuel olarak veritabanı oluşturmak istediğimde ise PostgreSQL bana şu inatçı collation sürüm hatasını veriyor:
+
+"ERROR: template database "template1" has a collation version, but no actual collation version could be determined"
+
+Farklı dil ve template parametreleri denedim (`--locale=C`, `LC_COLLATE = 'en_US.utf8'`) ancak her seferinde ya bu collation hatasını alıyorum ya da şablon uyumsuzluğu (incompatible with the collation of the template database) hatasıyla karşılaşıyorum. Docker imajındaki `template1` şablonu kilitlenmiş durumda.
+
+Benim `.env` dosyamdaki bağlantı satırım şu şekilde:
+DATABASE_URL=postgresql://ticketadmin:supersecret123@ticket_db:5432/ticketdb
+
+Bu collation/locale hatasını kalıcı olarak çözmek, `ticketadmin` kullanıcısını ve `ticketdb` veritabanını Docker ayağa kalkarken otomatik ve hatasız oluşturmak için docker-compose.yml dosyamı nasıl güncellemeliyim? Bana environment (ortam) ve locale ayarlarını içeren doğru docker-compose yapılandırmasını verir misin?

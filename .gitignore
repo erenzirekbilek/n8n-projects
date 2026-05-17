@@ -1,0 +1,22 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# API Keys
+*.pem
+*.key
+*.secret
+
+# Credentials
+credentials.json
+service-account.json
+*.credentials
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

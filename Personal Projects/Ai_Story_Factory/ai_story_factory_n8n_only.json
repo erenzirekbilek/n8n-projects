@@ -1,0 +1,236 @@
+{
+  "name": "AI Story Factory - %100 n8n (Ücretsiz)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ai-story-factory",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 280],
+      "id": "webhook",
+      "name": "Webhook Trigger",
+      "webhookId": "ai-story-factory"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json.body || $input.first().json;\n\nreturn [{\n  json: {\n    theme: input.theme || 'Fantasy',\n    genre: input.genre || 'Adventure',\n    target_platform: input.target_platform || 'TikTok',\n    story_length: input.story_length || 'short',\n    num_episodes: input.num_episodes || 2,\n    num_scenes_per_episode: input.num_scenes_per_episode || 3\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 280],
+      "id": "parse_input",
+      "name": "Parse Input"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "Bearer {{$credentials.groqApiKey}}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "model", "value": "llama-3.1-70b-versatile" },
+            { "name": "messages", "value": "=[{\"role\":\"system\",\"content\":\"Sen yaratıcı bir Hikaye Üretme Asanısın. ÇIKTI SADECE geçerli JSON olmalı, markdown yok, backtick yok. Şu yapıda çıktı ver:\\n{\\n  \\\"title\\\":\\\"string\\\",\\n  \\\"summary\\\":\\\"string\\\",\\n  \\\"genre\\\":\\\"string\\\",\\n  \\\"theme\\\":\\\"string\\\",\\n  \\\"characters\\\":[{\\\"name\\\":\\\"string\\\",\\\"appearance\\\":\\\"string\\\",\\\"voice_id\\\":\\\"string\\\"}],\\n  \\\"episodes\\\":[{\\\"episode_number\\\":1,\\\"title\\\":\\\"string\\\",\\\"summary\\\":\\\"string\\\",\\\"scenes\\\":[{\\\"scene_number\\\":1,\\\"description\\\":\\\"string\\\",\\\"dialogue\\\":{\\\"speaker\\\":\\\"string\\\",\\\"text\\\":\\\"string\\\"}}]}]\\n}\\nKurallar:\\n- Sahneler görsel üretime uygun detaylı olsun\\n- Diyalog max 15 kelime\\n- TikTok/Reels formatına uygun\\n- SADECE JSON çıktı ver\"},{\"role\":\"user\",\"content\":\"{{$json.story_length}} {{$json.genre}} hikayesi, tema: {{$json.theme}}, platform: {{$json.target_platform}}, bölüm: {{$json.num_episodes}}, sahne/bölüm: {{$json.num_scenes_per_episode}}\"}]" },
+            { "name": "temperature", "value": 0.85 },
+            { "name": "max_tokens", "value": 4000 }
+          ]
+        },
+        "options": { "timeout": 60000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [440, 280],
+      "id": "story_gen",
+      "name": "1. Hikaye Üret (Groq)",
+      "credentials": {
+        "httpHeaderAuth": { "id": "groq_api", "name": "Groq API Key" }
+      },
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst raw = response.choices?.[0]?.message?.content || '';\n\nlet story;\ntry {\n  story = JSON.parse(raw.replace(/```json/gi, '').replace(/```/g, '').trim());\n} catch (e) {\n  throw new Error('Geçersiz JSON: ' + raw.substring(0, 200));\n}\n\nif (!story.episodes) throw new Error('Episodes bulunamadı');\n\nreturn [{ json: story }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 280],
+      "id": "parse_story",
+      "name": "2. Story Parse"
+    },
+    {
+      "parameters": {
+        "jsCode": "const story = $input.first().json;\nconst allScenes = [];\n\nstory.episodes.forEach(ep => {\n  ep.scenes?.forEach(sc => {\n    allScenes.push({\n      story_title: story.title,\n      story_genre: story.genre,\n      story_theme: story.theme,\n      characters: story.characters,\n      episode_number: ep.episode_number,\n      episode_title: ep.title,\n      scene_number: sc.scene_number,\n      description: sc.description,\n      dialogue_speaker: sc.dialogue?.speaker || '',\n      dialogue_text: sc.dialogue?.text || '',\n      asset_key: `ep${ep.episode_number}_sc${sc.scene_number}`\n    });\n  });\n});\n\nreturn allScenes.map(s => ({ json: s }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 280],
+      "id": "extract_scenes",
+      "name": "3. Tüm Sahneleri Çıkar"
+    },
+    {
+      "parameters": { "options": { "batchSize": 1 } },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1100, 280],
+      "id": "loop_scenes",
+      "name": "4. Loop Over Scenes"
+    },
+    {
+      "parameters": {
+        "jsCode": "const scene = $input.first().json;\nconst chars = scene.characters || [];\nconst speaker = chars.find(c => c.name === scene.dialogue_speaker);\n\nconst genreStyle = {\n  'Fantasy': 'fantasy art, magical lighting, ethereal',\n  'Sci-Fi': 'sci-fi, cyberpunk, neon lights, futuristic',\n  'Horror': 'dark gothic, dramatic shadows, ominous',\n  'Romance': 'soft warm lighting, pastel colors, dreamy',\n  'Adventure': 'epic cinematic, vivid colors, dynamic',\n  'Drama': 'realistic, natural lighting, emotional'\n};\n\nconst platform = {\n  'TikTok': 'vertical 9:16, close-up',\n  'Shorts': 'vertical 9:16, dynamic angle',\n  'Reels': 'vertical 9:16, cinematic'\n};\n\nconst prompt = [\n  scene.description,\n  speaker?.appearance || '',\n  genreStyle[scene.story_genre] || 'cinematic',\n  platform[scene.target_platform] || 'vertical 9:16',\n  'ultra detailed, 4K, film grain'\n].filter(Boolean).join(', ');\n\nreturn [{ json: { ...scene, image_prompt: prompt } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 280],
+      "id": "build_prompt",
+      "name": "5. Image Prompt Oluştur"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "Bearer {{$credentials.huggingfaceApiKey}}" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "inputs", "value": "={{ $json.image_prompt }}" }
+          ]
+        },
+        "options": { "timeout": 120000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1540, 280],
+      "id": "gen_image",
+      "name": "6. Görsel Üret (HuggingFace)",
+      "credentials": {
+        "httpHeaderAuth": { "id": "hf_api", "name": "HuggingFace API" }
+      },
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst scene = $('5. Image Prompt Oluştur').first().json;\n\nlet imageData = null;\nif (Array.isArray(response) && response[0]) {\n  imageData = response[0].image || response[0].base64;\n} else if (response.image) {\n  imageData = response.image;\n}\n\nif (!imageData) throw new Error('Görsel bulunamadı');\n\nconst base64 = imageData.startsWith('data:') ? imageData : `data:image/png;base64,${imageData}`;\n\nreturn [{ json: { ...scene, image_base64: base64 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 280],
+      "id": "extract_img",
+      "name": "7. Image Base64 Al"
+    },
+    {
+      "parameters": {
+        "jsCode": "const scene = $input.first().json;\nconst b64 = scene.image_base64.replace(/^data:image\\/\\w+;base64,/, '');\nconst imageBytes = Buffer.from(b64, 'base64');\n\n// Canvas benzeri işlem - n8n'da PIL yok ama base64 manipulation yapabiliriz\n// Bu kısım gerçek bir Python subprocess gerektirir\n// Şimdilik orijinal görseli döndürüyoruz\n\nreturn [{\n  json: {\n    ...scene,\n    bubble_text: scene.dialogue_text,\n    speaker_name: scene.dialogue_speaker,\n    processed_image: scene.image_base64,\n    has_bubble: Boolean(scene.dialogue_text)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 280],
+      "id": "prep_bubble",
+      "name": "8. Bubble Hazırla"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.edge-tts.com/synthesize",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ text: $json.dialogue_text || ' ', voice: 'tr-TR-UmutNeural' }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": { "response": { "responseFormat": "binary" } }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2200, 280],
+      "id": "gen_voice",
+      "name": "9. Ses Üret (Edge TTS)",
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const voiceBinary = $input.first().binary;\nconst scene = $('8. Bubble Hazırla').first().json;\n\nconst voiceBase64 = voiceBinary?.data?.data\n  ? Buffer.from(voiceBinary.data.data).toString('base64')\n  : null;\n\nreturn [{\n  json: {\n    asset_key: scene.asset_key,\n    episode_number: scene.episode_number,\n    episode_title: scene.episode_title,\n    scene_number: scene.scene_number,\n    description: scene.description,\n    dialogue_speaker: scene.dialogue_speaker,\n    dialogue_text: scene.dialogue_text,\n    image_url: scene.processed_image,\n    voice_base64: voiceBase64 ? `data:audio/mp3;base64,${voiceBase64}` : null,\n    status: 'scene_complete'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, 280],
+      "id": "scene_done",
+      "name": "10. Sahne Tamam"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allScenes = $input.all().map(i => i.json);\n\nconst episodes = {};\nallScenes.forEach(sc => {\n  if (!episodes[sc.episode_number]) {\n    episodes[sc.episode_number] = { episode_number: sc.episode_number, episode_title: sc.episode_title, scenes: [] };\n  }\n  episodes[sc.episode_number].scenes.push(sc);\n});\n\nObject.values(episodes).forEach(ep => ep.scenes.sort((a, b) => a.scene_number - b.scene_number));\n\nconst sorted = Object.values(episodes).sort((a, b) => a.episode_number - b.episode_number);\n\nreturn [{\n  json: {\n    story_title: allScenes[0]?.story_title || 'Untitled',\n    total_scenes: allScenes.length,\n    episodes: sorted,\n    all_scenes: allScenes,\n    status: 'ready_for_video'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, 280],
+      "id": "merge_assets",
+      "name": "11. Tüm Assetleri Birleştir"
+    },
+    {
+      "parameters": {
+        "jsCode": "// FFmpeg command to create video from images and audio\n// Bu kısım Execute Command node ile çalıştırılabilir\n// Örnek: ffmpeg -loop 1 -i image.jpg -i audio.mp3 -c:v libx264 -c:a aac -shortest output.mp4\n\nconst data = $input.first().json;\n\n// Sahneleri base64 olarak video service'e gönder\n// Gerçek implementasyon için harici video servis gerekir\n// Şimdilik sahne bilgilerini döndür\n\nreturn [{\n  json: {\n    ...data,\n    video_generated: false,\n    note: 'Video oluşturma için FFmpeg veya harici servis gerekli',\n    scenes_data: data.all_scenes.map(sc => ({\n      asset_key: sc.asset_key,\n      image: sc.image_url,\n      audio: sc.voice_base64,\n      duration: 5\n    }))\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2860, 280],
+      "id": "video_prep",
+      "name": "12. Video Hazırla"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3080, 280],
+      "id": "respond",
+      "name": "13. Yanıt Ver"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": { "main": [[{ "node": "Parse Input", "type": "main", "index": 0 }]] },
+    "Parse Input": { "main": [[{ "node": "1. Hikaye Üret (Groq)", "type": "main", "index": 0 }]] },
+    "1. Hikaye Üret (Groq)": { "main": [[{ "node": "2. Story Parse", "type": "main", "index": 0 }]] },
+    "2. Story Parse": { "main": [[{ "node": "3. Tüm Sahneleri Çıkar", "type": "main", "index": 0 }]] },
+    "3. Tüm Sahneleri Çıkar": { "main": [[{ "node": "4. Loop Over Scenes", "type": "main", "index": 0 }]] },
+    "4. Loop Over Scenes": { "main": [[{ "node": "5. Image Prompt Oluştur", "type": "main", "index": 0 }], [{ "node": "11. Tüm Assetleri Birleştir", "type": "main", "index": 0 }]] },
+    "5. Image Prompt Oluştur": { "main": [[{ "node": "6. Görsel Üret (HuggingFace)", "type": "main", "index": 0 }]] },
+    "6. Görsel Üret (HuggingFace)": { "main": [[{ "node": "7. Image Base64 Al", "type": "main", "index": 0 }]] },
+    "7. Image Base64 Al": { "main": [[{ "node": "8. Bubble Hazırla", "type": "main", "index": 0 }]] },
+    "8. Bubble Hazırla": { "main": [[{ "node": "9. Ses Üret (Edge TTS)", "type": "main", "index": 0 }]] },
+    "9. Ses Üret (Edge TTS)": { "main": [[{ "node": "10. Sahne Tamam", "type": "main", "index": 0 }]] },
+    "10. Sahne Tamam": { "main": [[{ "node": "4. Loop Over Scenes", "type": "main", "index": 0 }]] },
+    "11. Tüm Assetleri Birleştir": { "main": [[{ "node": "12. Video Hazırla", "type": "main", "index": 0 }]] },
+    "12. Video Hazırla": { "main": [[{ "node": "13. Yanıt Ver", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveManualExecutions": true },
+  "id": "ai-story-factory-v3",
+  "tags": ["ai", "story", "free", "n8n-only"]
+}
